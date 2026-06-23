@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Coins, CreditCard, Plus, X, Check, CheckCircle2, History, Sparkles, Clock, ArrowRight, AlertTriangle, ShieldCheck, HelpCircle } from "lucide-react";
+import { Coins, CreditCard, Plus, X, Check, CheckCircle2, History, Sparkles, Clock, ArrowRight, AlertTriangle, ShieldCheck, HelpCircle, ShieldAlert } from "lucide-react";
 import { safeLocalStorage } from "../utils/storage";
 
 export interface CreditTransaction {
@@ -98,6 +98,14 @@ export function useCredits() {
     const stripeSuccess = params.get("stripe_success");
     const sessionId = params.get("session_id");
 
+    const safeReplaceState = (cleanUrl: string) => {
+      try {
+        window.history.replaceState({}, document.title, cleanUrl);
+      } catch (e) {
+        console.warn("Could not modify history state due to iframe restrictions:", e);
+      }
+    };
+
     if (stripeSuccess === "true" && sessionId) {
       const usedIds = JSON.parse(safeLocalStorage.getItem("ifas_processed_stripe_sessions") || "[]");
       if (!usedIds.includes(sessionId)) {
@@ -115,7 +123,7 @@ export function useCredits() {
               
               // Clean up parameters so user can't refresh
               const cleanUrl = window.location.pathname;
-              window.history.replaceState({}, document.title, cleanUrl);
+              safeReplaceState(cleanUrl);
               
               // Pop open the success modal beautifully
               setIsRechargeOpen(true);
@@ -127,16 +135,12 @@ export function useCredits() {
       } else {
         // Clear param if already processed
         const cleanUrl = window.location.pathname;
-        window.history.replaceState({}, document.title, cleanUrl);
+        safeReplaceState(cleanUrl);
       }
     } else if (params.get("stripe_cancel") === "true") {
       const cleanUrl = window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-      try {
-        alert("Paiement annulé. Aucun crédit n'a été décompté.");
-      } catch (e) {
-        console.warn("Could not alert. Payment cancels safely.", e);
-      }
+      safeReplaceState(cleanUrl);
+      console.log("Paiement annulé par l'utilisateur. Aucun crédit n'a été décompté.");
     }
   }, []);
 
@@ -195,10 +199,8 @@ interface RechargeModalProps {
 export function RechargeModal({ isOpen, onClose, credits, refillCredits, transactions }: RechargeModalProps) {
   const [selectedPlan, setSelectedPlan] = useState<number | null>(1); // default to Recommended plan
   const [isPaying, setIsPaying] = useState(false);
-  const [cardNumber, setCardNumber] = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardCvc, setCardCvc] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"checkout" | "history">("checkout");
   const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
 
@@ -283,20 +285,29 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
     e.preventDefault();
     if (selectedPlan === null) return;
     setIsPaying(true);
+    setPaymentError(null);
+
+    const controller = new AbortController();
+    const id = setTimeout(() => {
+      controller.abort();
+    }, 10000); // 10 seconds timeout
 
     try {
       // Call server API to request Stripe checkout redirect session
       const response = await fetch("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           planId: selectedPlan,
           appUrl: window.location.origin
         })
       });
+      clearTimeout(id);
 
       if (!response.ok) {
-        throw new Error("Erreur de connexion.");
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || "Une erreur est survenue lors de l'accès à Stripe.");
       }
 
       const result = await response.json();
@@ -305,31 +316,23 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
         // Redirect to Stripe hosted payment page
         window.location.href = result.url;
       } else {
-        // High-fidelity sandbox fallback
-        setTimeout(() => {
-          const plan = PLANS[selectedPlan];
-          refillCredits(plan.credits, `Recharge: ${plan.name} (${plan.credits >= 9999 ? "Accès Illimité" : `+${plan.credits} simulations`}) [Demo]`);
-          setIsPaying(false);
-          setPaymentSuccess(true);
-        }, 1500);
+        throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
       }
     } catch (err: any) {
-      console.warn("[Stripe Dev Fallback] Mode simulé activé.", err);
-      setTimeout(() => {
-        const plan = PLANS[selectedPlan];
-        refillCredits(plan.credits, `Recharge: ${plan.name} (${plan.credits >= 9999 ? "Accès Illimité" : `+${plan.credits} simulations`}) [Offline Fallback]`);
-        setIsPaying(false);
-        setPaymentSuccess(true);
-      }, 1000);
+      clearTimeout(id);
+      console.error("Stripe Redirection failed", err);
+      if (err.name === "AbortError") {
+        setPaymentError("La demande de redirection de paiement a expiré. Veuillez vérifier votre connexion.");
+      } else {
+        setPaymentError(err.message || "Une erreur est survenue lors de la redirection vers la plateforme de paiement.");
+      }
+      setIsPaying(false);
     }
   };
 
   const handleResetSuccess = () => {
     setPaymentSuccess(false);
     setSelectedPlan(1);
-    setCardNumber("");
-    setCardExpiry("");
-    setCardCvc("");
     onClose();
   };
 
@@ -617,65 +620,36 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
                   </div>
                 </div>
 
-                {/* Card input (Simulated stripe elements / real support fallback) */}
+                {/* Payment error notification */}
+                {paymentError && (
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl flex gap-2 items-start text-amber-900 text-xs leading-normal font-medium animate-fadeIn">
+                    <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-extrabold text-amber-950 uppercase tracking-wide text-[10px] mb-0.5">⚠️ Connexion Stripe indisponible</strong>
+                      {paymentError}
+                      <p className="mt-1 text-[10px] text-amber-700 font-normal">
+                        Si vous êtes l'administrateur, veuillez configurer la variable d'environnement <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px] text-rose-700">STRIPE_SECRET_KEY</code> avec vos clés Stripe de production pour débloquer les achats d'entraînement en ligne.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Redirect button to hosted Stripe payment */}
                 <form onSubmit={handleSimulatePayment} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Numéro de Carte Bancaire (Test / Réel)</label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        required
-                        placeholder="4242 4242 4242 4242"
-                        value={cardNumber}
-                        onChange={(e) => setCardNumber(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 px-3.5 py-2.5 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono tracking-wide"
-                        maxLength={19}
-                      />
-                      <CreditCard className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-35">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Date d'expiration</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="MM/AA"
-                        value={cardExpiry}
-                        onChange={(e) => setCardExpiry(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono text-center"
-                        maxLength={5}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">CVV / CVC</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="123"
-                        value={cardCvc}
-                        onChange={(e) => setCardCvc(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono text-center"
-                        maxLength={4}
-                      />
-                    </div>
-                  </div>
-
                   <button
                     type="submit"
                     disabled={isPaying || selectedPlan === null}
-                    className="w-full bg-gradient-to-tr from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:from-slate-300 disabled:to-slate-350 text-white font-bold py-3.5 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer text-xs md:text-sm shadow-md"
+                    className="w-full bg-gradient-to-tr from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:from-slate-300 disabled:to-slate-350 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer text-xs md:text-sm shadow-md"
                     id="btn-simulate-checkout"
                   >
                     {isPaying ? (
                       <div className="flex items-center gap-2">
                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                        <span>Lancement de Stripe...</span>
+                        <span>Redirection sécurisée vers Stripe...</span>
                       </div>
                     ) : (
-                      <span className="flex items-center gap-1.5">
-                        <ShieldCheck className="w-4.5 h-4.5 text-teal-100" /> Confirmer mon achat sécurisé ({currentPlan.price})
+                      <span className="flex items-center gap-1.5 uppercase font-black tracking-wider">
+                        <ShieldCheck className="w-4.5 h-4.5 text-teal-100" /> Procéder au paiement sécurisé ({currentPlan.price})
                       </span>
                     )}
                   </button>

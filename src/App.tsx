@@ -69,7 +69,14 @@ export default function App() {
 
   // App lock until payment status - false by default so the Sales Landing Page is the official homepage.
   const [isAppUnlocked, setIsAppUnlocked] = useState<boolean>(() => {
-    return safeSessionStorage.getItem("ifas_app_unlocked_session") === "true";
+    if (safeSessionStorage.getItem("ifas_app_unlocked_session") === "true") {
+      return true;
+    }
+    const savedCredits = safeLocalStorage.getItem("ifas_credits_count");
+    if (savedCredits && parseInt(savedCredits, 10) > 0 && savedCredits !== "3") {
+      return true;
+    }
+    return false;
   });
 
   // Automatically unlock only if actively marked in session
@@ -80,6 +87,13 @@ export default function App() {
       safeSessionStorage.removeItem("ifas_app_unlocked_session");
     }
   }, [isAppUnlocked]);
+
+  // Synchronise le deverrouillage si l'utilisateur possède déjà ou acquiert des crédits payés
+  useEffect(() => {
+    if (credits > 0) {
+      setIsAppUnlocked(true);
+    }
+  }, [credits]);
 
   // Contrôleur de référencement SEO : Empêche l'indexation de l'application mais autorise celle de la page de vente
   useEffect(() => {

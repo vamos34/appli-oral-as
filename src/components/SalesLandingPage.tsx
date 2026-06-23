@@ -121,16 +121,7 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
       const result = await response.json();
 
       if (result.url) {
-        // Redirection vers Stripe (essaye de s'échapper de l'Iframe si nécessaire)
-        try {
-          if (window.top && window.top !== window.self) {
-            window.top.location.href = result.url;
-          } else {
-            window.location.href = result.url;
-          }
-        } catch (iframeErr) {
-          window.open(result.url, "_blank");
-        }
+        window.location.href = result.url;
       } else {
         throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
       }
