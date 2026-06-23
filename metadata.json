@@ -1,0 +1,8 @@
+{
+  "name": "Oral Blanc Aide-Soignant IFAS",
+  "description": "Simulateur d'entretien de concours aide-soignant avec jury virtuel intelligent, évaluant par écrit vos réponses sur 25 conforme aux diagnostics de bientraitance et d'hygiène, avec rechargement de crédits via Stripe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
