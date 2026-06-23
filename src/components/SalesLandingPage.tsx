@@ -14,6 +14,7 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
   const [selectedPlan, setSelectedPlan] = useState<number>(1); // Default to Recommended multi-pass plan
   const [isPaying, setIsPaying] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [iframeNotice, setIframeNotice] = useState<string | null>(null);
   const [stripeUrl, setStripeUrl] = useState<string | null>(null);
   const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
 
@@ -96,6 +97,7 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
     e.preventDefault();
     setIsPaying(true);
     setPaymentError(null);
+    setIframeNotice(null);
     setStripeUrl(null);
 
     const controller = new AbortController();
@@ -135,16 +137,16 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
             console.warn("window.open blocked by sandbox or browser policy:", openErr);
           }
           if (newWindow) {
-            setPaymentError("Une fenêtre de paiement sécurisé vient de s'ouvrir. Si elle n'apparaît pas, veuillez utiliser le bouton ci-dessous.");
+            setIframeNotice("Lien sécurisé généré ! Une nouvelle fenêtre de paiement s'est ouverte. Utilisez le bouton orange ci-dessous pour y accéder si elle n'apparaît pas.");
           } else {
-            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur ou l'environnement de prévisualisation. Veuillez cliquer sur le bouton ci-dessous pour payer.");
+            setIframeNotice("L'ouverture automatique de l'onglet de paiement a été bloquée par votre navigateur ou l'environnement de prévisualisation. Veuillez cliquer sur le bouton orange ci-dessous pour payer.");
           }
         } else {
           try {
             window.location.href = result.url;
           } catch (hrefErr) {
             console.error("Failed to redirect via window.location.href:", hrefErr);
-            setPaymentError("Impossible de vous rediriger automatiquement. Veuillez cliquer sur le bouton ci-dessous.");
+            setIframeNotice("Impossible de vous rediriger automatiquement. Veuillez cliquer sur le bouton orange ci-dessous pour ouvrir la page de paiement Stripe.");
           }
         }
       } else {
@@ -158,6 +160,7 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
       } else {
         setPaymentError(err.message || "Une erreur est survenue lors de la redirection vers la plateforme de paiement.");
       }
+    } finally {
       setIsPaying(false);
     }
   };
@@ -530,23 +533,33 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
               </div>
 
               {paymentError && (
-                <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex gap-2 items-start text-amber-900 text-xs leading-normal font-medium">
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex gap-x-2 items-start text-amber-900 text-xs leading-normal font-medium">
                   <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="block font-extrabold text-amber-950 uppercase tracking-wide text-[10px] mb-0.5">⚠️ Service de paiement non disponible</strong>
+                    <strong className="block font-extrabold text-amber-950 uppercase tracking-wide text-[10px] mb-0.5">⚠️ Erreur de configuration de paiement</strong>
                     {paymentError}
                     <p className="mt-1 text-[10px] text-amber-700 font-normal">
-                      Si vous êtes l'administrateur, veuillez configurer la variable d'environnement <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px] text-rose-700">STRIPE_SECRET_KEY</code> avec vos clés Stripe de production pour débloquer les achats d'entraînement en ligne.
+                      Veuillez vérifier que la clé API <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px] text-rose-700">STRIPE_SECRET_KEY</code> est correctement enregistrée et active dans les variables d'environnement de votre application de production.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {iframeNotice && (
+                <div className="bg-blue-50 border border-blue-200 p-3.5 rounded-2xl flex gap-x-2.5 items-start text-blue-900 text-xs leading-normal font-medium">
+                  <Sparkles className="w-5 h-5 text-blue-500 shrink-0 mt-0.5 animate-pulse" />
+                  <div>
+                    <strong className="block font-extrabold text-blue-950 uppercase tracking-wide text-[10px] mb-0.5">💡 RE-DIRECTION SÉCURISÉE EN COURS</strong>
+                    {iframeNotice}
                   </div>
                 </div>
               )}
 
               {stripeUrl && (
                 <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl text-center space-y-2">
-                  <strong className="block font-bold text-teal-950 text-xs">🚀 Lien de paiement généré avec succès !</strong>
+                  <strong className="block font-bold text-teal-950 text-xs">🚀 Lien de paiement sécurisé prêt !</strong>
                   <p className="text-[11px] text-teal-800">
-                    S'agissant d'un environnement sécurisé de prévisualisation, veuillez cliquer sur le bouton ci-dessous pour ouvrir l'interface de paiement Stripe :
+                    Cliquez sur le bouton orange ci-dessous pour ouvrir la passerelle Stripe et régler de façon 100% cryptée :
                   </p>
                   <a
                     href={stripeUrl}
