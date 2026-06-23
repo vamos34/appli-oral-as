@@ -50,3 +50,36 @@ export const safeSessionStorage = {
     }
   }
 };
+
+export function safeGetLocationPathname(): string {
+  try {
+    return window.location.pathname || "/";
+  } catch (e) {
+    return "/";
+  }
+}
+
+export function safeGetLocationSearch(): string {
+  try {
+    return window.location.search || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+export function safeGetLocationOrigin(): string {
+  try {
+    return window.location.origin || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+export function safeIsInIframe(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch (e) {
+    return true;
+  }
+}
+

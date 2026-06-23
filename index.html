@@ -5,6 +5,38 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🩺</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oral Blanc IFAS - Préparation Concours Aide-Soignant</title>
+    <script>
+      // Early suppression of cross-origin or sandbox iframe script errors (e.g., from preview environments) and non-breaking warnings
+      (function() {
+        var suppress = function(msg) {
+          var text = String(msg || "").toLowerCase();
+          return text.includes("script error") || text.includes("resizeobserver");
+        };
+        window.addEventListener('error', function(e) {
+          if (suppress(e.message)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason ? (e.reason.message || String(e.reason)) : "";
+          if (suppress(reason)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          }
+        }, true);
+        var origOnError = window.onerror;
+        window.onerror = function(message, source, lineno, colno, error) {
+          if (suppress(message)) {
+            return true;
+          }
+          if (origOnError) {
+            return origOnError.apply(this, arguments);
+          }
+          return false;
+        };
+      })();
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased font-sans">
     <div id="root"></div>

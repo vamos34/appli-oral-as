@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Coins, CreditCard, Plus, X, Check, CheckCircle2, History, Sparkles, Clock, ArrowRight, AlertTriangle, ShieldCheck, HelpCircle, ShieldAlert } from "lucide-react";
-import { safeLocalStorage } from "../utils/storage";
+import { safeLocalStorage, safeGetLocationPathname, safeGetLocationSearch, safeGetLocationOrigin, safeIsInIframe } from "../utils/storage";
 
 export interface CreditTransaction {
   id: string;
@@ -30,7 +30,7 @@ export function useCredits() {
         if (Array.isArray(parsed)) {
           // Filter out any legacy offered credits transactions
           const cleaned = parsed.filter(
-            (tx) => tx.id !== "init-1" && !tx.description.toLowerCase().includes("offert")
+            (tx) => tx && tx.id !== "init-1" && typeof tx.description === "string" && !tx.description.toLowerCase().includes("offert")
           );
           if (cleaned.length !== parsed.length) {
             safeLocalStorage.setItem("ifas_credits_history", JSON.stringify(cleaned));
@@ -47,6 +47,8 @@ export function useCredits() {
 
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isGateOpen, setIsGateOpen] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [verificationErrorMessage, setVerificationErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     safeLocalStorage.setItem("ifas_credits_count", credits.toString());
@@ -94,7 +96,7 @@ export function useCredits() {
 
   // Stripe success redirection callback parser
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(safeGetLocationSearch());
     const stripeSuccess = params.get("stripe_success");
     const sessionId = params.get("session_id");
 
@@ -107,38 +109,59 @@ export function useCredits() {
     };
 
     if (stripeSuccess === "true" && sessionId) {
-      const usedIds = JSON.parse(safeLocalStorage.getItem("ifas_processed_stripe_sessions") || "[]");
+      let usedIds: string[] = [];
+      try {
+        const storedValue = safeLocalStorage.getItem("ifas_processed_stripe_sessions");
+        usedIds = JSON.parse(storedValue || "[]");
+        if (!Array.isArray(usedIds)) {
+          usedIds = [];
+        }
+      } catch (e) {
+        usedIds = [];
+      }
       if (!usedIds.includes(sessionId)) {
+        setVerificationStatus("loading");
+        setVerificationErrorMessage(null);
+
         // Call backend verification to check with Stripe if sessionId has been fully paid
         fetch(`/api/stripe/verify-session?sessionId=${encodeURIComponent(sessionId)}`)
           .then(async (res) => {
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
-              throw new Error("Validation échouée auprès de Stripe.");
+              throw new Error(data.error || "La validation sécurisée a échoué auprès de Stripe.");
             }
-            const data = await res.json();
             if (data.valid) {
               refillCredits(data.credits, `Paiement Stripe Réussi: ${data.planName}`);
               usedIds.push(sessionId);
               safeLocalStorage.setItem("ifas_processed_stripe_sessions", JSON.stringify(usedIds));
+              safeLocalStorage.setItem("ifas_user_has_paid", "true");
+              
+              setVerificationStatus("success");
               
               // Clean up parameters so user can't refresh
-              const cleanUrl = window.location.pathname;
+              const cleanUrl = safeGetLocationPathname();
               safeReplaceState(cleanUrl);
               
               // Pop open the success modal beautifully
-              setIsRechargeOpen(true);
+              setTimeout(() => {
+                setIsRechargeOpen(true);
+              }, 1500);
+            } else {
+              throw new Error(data.error || "La transaction n'a pas été confirmée comme payée.");
             }
           })
           .catch((err) => {
             console.error("Erreur de validation Stripe:", err);
+            setVerificationStatus("error");
+            setVerificationErrorMessage(err.message || "Erreur lors de la vérification de votre paiement.");
           });
       } else {
         // Clear param if already processed
-        const cleanUrl = window.location.pathname;
+        const cleanUrl = safeGetLocationPathname();
         safeReplaceState(cleanUrl);
       }
     } else if (params.get("stripe_cancel") === "true") {
-      const cleanUrl = window.location.pathname;
+      const cleanUrl = safeGetLocationPathname();
       safeReplaceState(cleanUrl);
       console.log("Paiement annulé par l'utilisateur. Aucun crédit n'a été décompté.");
     }
@@ -153,6 +176,10 @@ export function useCredits() {
     setIsRechargeOpen,
     isGateOpen,
     setIsGateOpen,
+    verificationStatus,
+    setVerificationStatus,
+    verificationErrorMessage,
+    setVerificationErrorMessage
   };
 }
 
@@ -282,7 +309,7 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
     }
   ];
 
-  const handleSimulatePayment = async (e: React.FormEvent) => {
+  const handleStripeCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedPlan === null) return;
     setIsPaying(true);
@@ -302,7 +329,7 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
         signal: controller.signal,
         body: JSON.stringify({
           planId: selectedPlan,
-          appUrl: window.location.origin
+          appUrl: safeGetLocationOrigin()
         })
       });
       clearTimeout(id);
@@ -318,16 +345,26 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
         setStripeUrl(result.url);
         
         // Detect if running inside iframe (like AI Studio)
-        const isInIframe = window.self !== window.top;
+        const isInIframe = safeIsInIframe();
         if (isInIframe) {
-          const newWindow = window.open(result.url, "_blank");
+          let newWindow: Window | null = null;
+          try {
+            newWindow = window.open(result.url, "_blank");
+          } catch (openErr) {
+            console.warn("window.open blocked by sandbox or browser policy:", openErr);
+          }
           if (newWindow) {
             setPaymentError("Une fenêtre de paiement sécurisé vient de s'ouvrir. Si elle n'apparaît pas, veuillez utiliser le bouton ci-dessous.");
           } else {
-            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur. Veuillez cliquer sur le bouton de secours ci-dessous.");
+            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur ou l'environnement de prévisualisation. Veuillez cliquer sur le bouton ci-dessous pour payer.");
           }
         } else {
-          window.location.href = result.url;
+          try {
+            window.location.href = result.url;
+          } catch (hrefErr) {
+            console.error("Failed to redirect via window.location.href:", hrefErr);
+            setPaymentError("Impossible de vous rediriger automatiquement. Veuillez cliquer sur le bouton ci-dessous.");
+          }
         }
       } else {
         throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
@@ -666,12 +703,12 @@ export function RechargeModal({ isOpen, onClose, credits, refillCredits, transac
                 )}
 
                 {/* Redirect button to hosted Stripe payment */}
-                <form onSubmit={handleSimulatePayment} className="space-y-4">
+                <form onSubmit={handleStripeCheckout} className="space-y-4">
                   <button
                     type="submit"
                     disabled={isPaying || selectedPlan === null}
                     className="w-full bg-gradient-to-tr from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:from-slate-300 disabled:to-slate-350 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer text-xs md:text-sm shadow-md"
-                    id="btn-simulate-checkout"
+                    id="btn-stripe-checkout"
                   >
                     {isPaying ? (
                       <div className="flex items-center gap-2">

@@ -7,7 +7,7 @@ import HistoryPanel from "./components/HistoryPanel";
 import SalesLandingPage from "./components/SalesLandingPage";
 import { CGVModal, MentionsLegalesModal } from "./components/LegalModals";
 import { Activity, Sparkles, RefreshCw, AlertCircle, ArrowLeft, HeartPulse, ShieldCheck, HelpCircle, User, Award, BookOpen, Send, CheckCircle2, ChevronRight, MessageSquare, Briefcase, Sun, Moon } from "lucide-react";
-import { safeLocalStorage, safeSessionStorage } from "./utils/storage";
+import { safeLocalStorage, safeSessionStorage, safeGetLocationPathname } from "./utils/storage";
 
 export default function App() {
   const {
@@ -19,6 +19,10 @@ export default function App() {
     setIsRechargeOpen,
     isGateOpen,
     setIsGateOpen,
+    verificationStatus,
+    setVerificationStatus,
+    verificationErrorMessage,
+    setVerificationErrorMessage
   } = useCredits();
 
   // Dark mode / light mode state
@@ -69,31 +73,35 @@ export default function App() {
 
   // App lock until payment status - false by default so the Sales Landing Page is the official homepage.
   const [isAppUnlocked, setIsAppUnlocked] = useState<boolean>(() => {
-    if (safeSessionStorage.getItem("ifas_app_unlocked_session") === "true") {
+    if (safeLocalStorage.getItem("ifas_user_has_paid") === "true") {
       return true;
     }
     const savedCredits = safeLocalStorage.getItem("ifas_credits_count");
-    if (savedCredits && parseInt(savedCredits, 10) > 0 && savedCredits !== "3") {
-      return true;
+    if (savedCredits) {
+      const creditsVal = parseInt(savedCredits, 10);
+      return creditsVal > 0;
     }
     return false;
   });
 
-  // Automatically unlock only if actively marked in session
-  useEffect(() => {
-    if (isAppUnlocked) {
-      safeSessionStorage.setItem("ifas_app_unlocked_session", "true");
-    } else {
-      safeSessionStorage.removeItem("ifas_app_unlocked_session");
-    }
-  }, [isAppUnlocked]);
-
-  // Synchronise le deverrouillage si l'utilisateur possède déjà ou acquiert des crédits payés
+  // Synchronise le deverrouillage si l'utilisateur possède déjà ou acquiert des crédits de manière payée et légitime (avec mémoire de paiement)
   useEffect(() => {
     if (credits > 0) {
       setIsAppUnlocked(true);
+      safeLocalStorage.setItem("ifas_user_has_paid", "true");
+    } else {
+      if (safeLocalStorage.getItem("ifas_user_has_paid") !== "true") {
+        setIsAppUnlocked(false);
+      }
     }
   }, [credits]);
+
+  useEffect(() => {
+    if (verificationStatus === "success") {
+      setIsAppUnlocked(true);
+      safeLocalStorage.setItem("ifas_user_has_paid", "true");
+    }
+  }, [verificationStatus]);
 
   // Contrôleur de référencement SEO : Empêche l'indexation de l'application mais autorise celle de la page de vente
   useEffect(() => {
@@ -314,12 +322,103 @@ export default function App() {
   if (!isAppUnlocked) {
     return (
       <>
+        {verificationStatus !== "idle" && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-850 rounded-3xl p-8 max-w-md w-full text-center border border-slate-100 dark:border-slate-800 shadow-2xl space-y-6">
+              
+              {verificationStatus === "loading" && (
+                <>
+                  <div className="relative flex justify-center items-center py-4">
+                    <div className="w-16 h-16 border-4 border-teal-100 dark:border-teal-900 border-t-teal-500 rounded-full animate-spin"></div>
+                    <HeartPulse className="w-7 h-7 text-teal-600 dark:text-teal-400 absolute animate-pulse" />
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                      Validation du paiement
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
+                      🩺 Connexion sécurisée avec Stripe en cours...<br />
+                      Veuillez ne pas fermer cette page pendant que nous créditons votre compte (cela prend moins de 5 secondes).
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {verificationStatus === "success" && (
+                <>
+                  <div className="flex justify-center py-2">
+                    <div className="bg-emerald-100 dark:bg-emerald-955 p-4 rounded-full text-emerald-600 dark:text-emerald-450 border border-emerald-250 dark:border-emerald-900">
+                      <CheckCircle2 className="w-12 h-12 shrink-0 animate-bounce" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-xl font-black text-emerald-700 dark:text-emerald-450 uppercase tracking-wider">
+                      Paiement Validé ! 🎉
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                      Votre transaction a été confirmée avec succès. Vos crédits ont été chargés et l'application est maintenant déverrouillée !
+                  </p>
+                  </div>
+                  <button
+                    onClick={() => setVerificationStatus("idle")}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 px-5 rounded-xl cursor-pointer text-xs uppercase tracking-wider shadow-md active:scale-95 transition"
+                  >
+                    Accéder à mes simulations
+                  </button>
+                </>
+              )}
+
+              {verificationStatus === "error" && (
+                <>
+                  <div className="flex justify-center py-2">
+                    <div className="bg-rose-100 dark:bg-rose-955 p-4 rounded-full text-rose-600 dark:text-rose-450 border border-rose-200 dark:border-rose-900">
+                      <AlertCircle className="w-12 h-12" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h3 className="text-lg font-black text-rose-700 dark:text-rose-450 uppercase tracking-wider">
+                      Échec de validation
+                    </h3>
+                    <div className="text-xs text-rose-800 dark:text-rose-300 bg-rose-50 dark:bg-rose-955/45 p-3 rounded-xl border border-rose-150 dark:border-rose-900 text-left space-y-1">
+                      <strong className="block font-bold text-rose-950 dark:text-white">Détail technique :</strong>
+                      <p className="font-mono text-[10px] break-words">{verificationErrorMessage}</p>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-450 leading-relaxed pt-2 leading-relaxed">
+                      Si l'achat a été prélevé mais que l'erreur s'affiche, cela signifie généralement que le secret administrateur <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-rose-600 font-mono text-[10px]">STRIPE_SECRET_KEY</code> n'est pas ou est mal configuré sur votre serveur de production.
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setVerificationStatus("idle");
+                        try {
+                          window.history.replaceState({}, document.title, safeGetLocationPathname());
+                        } catch (_) {}
+                      }}
+                      className="flex-1 bg-slate-100 hover:bg-slate-205 dark:bg-slate-700 dark:hover:bg-slate-650 text-slate-700 dark:text-slate-250 font-bold py-3 px-4 rounded-xl cursor-pointer text-xs"
+                    >
+                      Retour
+                    </button>
+                    <button
+                      onClick={() => {
+                        try {
+                          window.location.reload();
+                        } catch (_) {
+                          console.warn("Reload of page is not supported or was blocked by sandbox policy.");
+                        }
+                      }}
+                      className="flex-1 bg-gradient-to-r from-teal-500 to-teal-600 text-white font-extrabold py-3 px-4 rounded-xl cursor-pointer text-xs uppercase tracking-wider shadow-md hover:scale-[1.02] active:scale-95 transition"
+                    >
+                      🔄 Réessayer
+                    </button>
+                  </div>
+                </>
+              )}
+
+            </div>
+          </div>
+        )}
         <SalesLandingPage
-          onUnlock={(creditsToAdd, planName) => {
-            refillCredits(creditsToAdd, `Formule : ${planName}`);
-            setIsAppUnlocked(true);
-            safeLocalStorage.setItem("ifas_app_unlocked", "true");
-          }}
           onOpenLegal={(page) => setViewingLegalPage(page)}
         />
         <CGVModal
@@ -628,7 +727,7 @@ export default function App() {
 
                     <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-3 border border-slate-200 dark:border-slate-700 flex items-center gap-2.5 text-slate-600 dark:text-slate-400 text-xs">
                       <Activity className="w-4 h-4 text-teal-600 shrink-0" />
-                      <span>Coût de lancement : <strong className="text-slate-800 dark:text-slate-200">1 crédit d'entraînement</strong>. 3 essais gratuits offerts au total.</span>
+                      <span>Coût de lancement : <strong className="text-slate-800 dark:text-slate-200">1 crédit d'entraînement</strong> par session de jury interactif.</span>
                     </div>
 
                     <button

@@ -4,13 +4,13 @@ import {
   Tv, Award, BookOpen, Users, Volume2, Target, Coins, CreditCard, 
   ArrowRight, ShieldAlert, BadgeHelp, HelpCircle, ArrowDown 
 } from "lucide-react";
+import { safeGetLocationOrigin, safeIsInIframe } from "../utils/storage";
 
 interface SalesLandingPageProps {
-  onUnlock: (credits: number, planName: string) => void;
   onOpenLegal: (page: "cgv" | "mentions") => void;
 }
 
-export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLandingPageProps) {
+export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps) {
   const [selectedPlan, setSelectedPlan] = useState<number>(1); // Default to Recommended multi-pass plan
   const [isPaying, setIsPaying] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -110,7 +110,7 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
         signal: controller.signal,
         body: JSON.stringify({
           planId: selectedPlan,
-          appUrl: window.location.origin
+          appUrl: safeGetLocationOrigin()
         })
       });
       clearTimeout(id);
@@ -126,16 +126,26 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
         setStripeUrl(result.url);
         
         // Detect if running inside iframe (like AI Studio)
-        const isInIframe = window.self !== window.top;
+        const isInIframe = safeIsInIframe();
         if (isInIframe) {
-          const newWindow = window.open(result.url, "_blank");
+          let newWindow: Window | null = null;
+          try {
+            newWindow = window.open(result.url, "_blank");
+          } catch (openErr) {
+            console.warn("window.open blocked by sandbox or browser policy:", openErr);
+          }
           if (newWindow) {
             setPaymentError("Une fenêtre de paiement sécurisé vient de s'ouvrir. Si elle n'apparaît pas, veuillez utiliser le bouton ci-dessous.");
           } else {
-            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur. Veuillez cliquer sur le bouton de secours ci-dessous.");
+            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur ou l'environnement de prévisualisation. Veuillez cliquer sur le bouton ci-dessous pour payer.");
           }
         } else {
-          window.location.href = result.url;
+          try {
+            window.location.href = result.url;
+          } catch (hrefErr) {
+            console.error("Failed to redirect via window.location.href:", hrefErr);
+            setPaymentError("Impossible de vous rediriger automatiquement. Veuillez cliquer sur le bouton ci-dessous.");
+          }
         }
       } else {
         throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
