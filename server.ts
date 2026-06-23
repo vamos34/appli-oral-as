@@ -20,7 +20,7 @@ function isMockKey(): boolean {
   if (!stripeSecretKey) {
     return true; // No key means mock/simulation
   }
-  stripeSecretKey = stripeSecretKey.trim();
+  stripeSecretKey = stripeSecretKey.trim().replace(/[\r\n\t ]/g, "");
   if (stripeSecretKey.startsWith('"') && stripeSecretKey.endsWith('"')) {
     stripeSecretKey = stripeSecretKey.slice(1, -1).trim();
   } else if (stripeSecretKey.startsWith("'") && stripeSecretKey.endsWith("'")) {
@@ -42,20 +42,18 @@ function getStripe(): Stripe {
     throw new Error("La variable d'environnement STRIPE_SECRET_KEY n'est pas définie dans vos secrets.");
   }
 
-  // Nettoyage des espaces et des guillemets doubles ou simples
-  stripeSecretKey = stripeSecretKey.trim();
+  // Nettoyage des espaces, des retours à la ligne et des guillemets
+  stripeSecretKey = stripeSecretKey.trim().replace(/[\r\n\t ]/g, "");
   if (stripeSecretKey.startsWith('"') && stripeSecretKey.endsWith('"')) {
     stripeSecretKey = stripeSecretKey.slice(1, -1).trim();
   } else if (stripeSecretKey.startsWith("'") && stripeSecretKey.endsWith("'")) {
     stripeSecretKey = stripeSecretKey.slice(1, -1).trim();
   }
 
-  if (!stripeClient) {
-    stripeClient = new Stripe(stripeSecretKey, {
-      apiVersion: "2023-10-16" as any,
-    });
-  }
-  return stripeClient;
+  // Toujours instancier un nouveau client Stripe pour éviter les bugs de mise en cache si l'utilisateur change de clé dans l'administration
+  return new Stripe(stripeSecretKey, {
+    apiVersion: "2023-10-16" as any,
+  });
 }
 
 // Initialize Gemini SDK with robust validations

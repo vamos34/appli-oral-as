@@ -118,8 +118,15 @@ export default function SalesLandingPage({ onOpenLegal }: SalesLandingPageProps)
       clearTimeout(id);
 
       if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.error || "Une erreur est survenue lors de l'accès à Stripe.");
+        const errText = await response.text().catch(() => "");
+        let errMsg = "Erreur d'accès à Stripe.";
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.error || errJson.message || errMsg;
+        } catch (e) {
+          errMsg = `${response.status === 502 ? "Le serveur de paiement n'a pas répondu (Erreur 502)." : `Le serveur a retourné une erreur (Statut ${response.status}).`} ${errText.substring(0, 120)}`;
+        }
+        throw new Error(errMsg);
       }
 
       const result = await response.json();
