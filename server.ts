@@ -348,6 +348,9 @@ app.post("/api/stripe/create-checkout-session", async (req, res) => {
     const stripe = getStripe();
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
+      metadata: {
+        planId: plan.id.toString(),
+      },
       line_items: [
         {
           price_data: {
@@ -364,19 +367,42 @@ app.post("/api/stripe/create-checkout-session", async (req, res) => {
       mode: "payment",
       success_url: `${origin}/?stripe_success=true&credits=${plan.credits}&plan_name=${encodeURIComponent(plan.name)}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/?stripe_cancel=true`,
-    }, {
-      timeout: 3500, // 3.5 seconds fast network fail timeout to trigger fallback
     });
 
     res.json({ url: session.url, isSimulation: false });
   } catch (error: any) {
-    console.warn("[Stripe API Fallback] Stripe non disponible. Utilisation du mode bac-à-sable simulé.", error.message);
-    res.json({
-      url: null,
-      isSimulation: true,
-      errorInfo: error.message,
-      message: "Exécution locale sandbox (clé Stripe non fournie ou incorrecte)."
+    console.error("[Stripe API Error] Stripe creation failed.", error.message);
+    res.status(500).json({
+      error: "Service de paiement indisponible.",
+      details: error.message
     });
+  }
+});
+
+app.get("/api/stripe/verify-session", async (req, res) => {
+  const { sessionId } = req.query;
+  if (!sessionId || typeof sessionId !== "string") {
+    return res.status(400).json({ valid: false, error: "Session ID est requis." });
+  }
+
+  try {
+    const stripe = getStripe();
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.payment_status === "paid") {
+      const planIdStr = session.metadata?.planId;
+      const planId = planIdStr ? parseInt(planIdStr, 10) : null;
+      const plan = PLANS_METADATA.find(p => p.id === planId);
+
+      if (plan) {
+        return res.json({ valid: true, credits: plan.credits, planName: plan.name });
+      } else {
+        return res.json({ valid: true, credits: 5, planName: "Offre Préparation" });
+      }
+    }
+    return res.json({ valid: false, error: "La session n'a pas été payée." });
+  } catch (error: any) {
+    console.error("[Stripe session verification error]:", error.message);
+    return res.status(500).json({ valid: false, error: "Une erreur est survenue lors de la vérification de la transaction." });
   }
 });
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Coins, CreditCard, Plus, X, Check, CheckCircle2, History, Sparkles, Clock, ArrowRight, AlertTriangle, ShieldCheck, HelpCircle } from "lucide-react";
+import { safeLocalStorage } from "../utils/storage";
 
 export interface CreditTransaction {
   id: string;
@@ -12,17 +13,17 @@ export interface CreditTransaction {
 // Custom hook to manage credits and history synchronized with localStorage
 export function useCredits() {
   const [credits, setCredits] = useState<number>(() => {
-    const saved = localStorage.getItem("ifas_credits_count");
+    const saved = safeLocalStorage.getItem("ifas_credits_count");
     // Force reset if legacy '3' credits are found, to ensure 0 credits
     if (saved === "3") {
-      localStorage.setItem("ifas_credits_count", "0");
+      safeLocalStorage.setItem("ifas_credits_count", "0");
       return 0;
     }
     return saved !== null ? parseInt(saved, 10) : 0; // 0 free credits initially
   });
 
   const [transactions, setTransactions] = useState<CreditTransaction[]>(() => {
-    const saved = localStorage.getItem("ifas_credits_history");
+    const saved = safeLocalStorage.getItem("ifas_credits_history");
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -32,7 +33,7 @@ export function useCredits() {
             (tx) => tx.id !== "init-1" && !tx.description.toLowerCase().includes("offert")
           );
           if (cleaned.length !== parsed.length) {
-            localStorage.setItem("ifas_credits_history", JSON.stringify(cleaned));
+            safeLocalStorage.setItem("ifas_credits_history", JSON.stringify(cleaned));
           }
           return cleaned;
         }
@@ -48,11 +49,11 @@ export function useCredits() {
   const [isGateOpen, setIsGateOpen] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem("ifas_credits_count", credits.toString());
+    safeLocalStorage.setItem("ifas_credits_count", credits.toString());
   }, [credits]);
 
   useEffect(() => {
-    localStorage.setItem("ifas_credits_history", JSON.stringify(transactions));
+    safeLocalStorage.setItem("ifas_credits_history", JSON.stringify(transactions));
   }, [transactions]);
 
   const spendCredit = (description: string = "Lancement d'une simulation d'entretien") => {
@@ -95,30 +96,47 @@ export function useCredits() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const stripeSuccess = params.get("stripe_success");
-    const creditsToAddStr = params.get("credits");
-    const planName = params.get("plan_name") || "Forfait d'entraînement";
     const sessionId = params.get("session_id");
 
-    if (stripeSuccess === "true" && creditsToAddStr && sessionId) {
-      const creditsToAdd = parseInt(creditsToAddStr, 10);
-      
-      const usedIds = JSON.parse(localStorage.getItem("ifas_processed_stripe_sessions") || "[]");
+    if (stripeSuccess === "true" && sessionId) {
+      const usedIds = JSON.parse(safeLocalStorage.getItem("ifas_processed_stripe_sessions") || "[]");
       if (!usedIds.includes(sessionId)) {
-        refillCredits(creditsToAdd, `Paiement Stripe Réussi: ${planName}`);
-        usedIds.push(sessionId);
-        localStorage.setItem("ifas_processed_stripe_sessions", JSON.stringify(usedIds));
-        
-        // Modal can pop open showing success nicely
-        setIsRechargeOpen(true);
-        
-        // Remove params from URL
+        // Call backend verification to check with Stripe if sessionId has been fully paid
+        fetch(`/api/stripe/verify-session?sessionId=${encodeURIComponent(sessionId)}`)
+          .then(async (res) => {
+            if (!res.ok) {
+              throw new Error("Validation échouée auprès de Stripe.");
+            }
+            const data = await res.json();
+            if (data.valid) {
+              refillCredits(data.credits, `Paiement Stripe Réussi: ${data.planName}`);
+              usedIds.push(sessionId);
+              safeLocalStorage.setItem("ifas_processed_stripe_sessions", JSON.stringify(usedIds));
+              
+              // Clean up parameters so user can't refresh
+              const cleanUrl = window.location.pathname;
+              window.history.replaceState({}, document.title, cleanUrl);
+              
+              // Pop open the success modal beautifully
+              setIsRechargeOpen(true);
+            }
+          })
+          .catch((err) => {
+            console.error("Erreur de validation Stripe:", err);
+          });
+      } else {
+        // Clear param if already processed
         const cleanUrl = window.location.pathname;
         window.history.replaceState({}, document.title, cleanUrl);
       }
     } else if (params.get("stripe_cancel") === "true") {
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, document.title, cleanUrl);
-      alert("Paiement annulé. Aucun crédit n'a été décompté.");
+      try {
+        alert("Paiement annulé. Aucun crédit n'a été décompté.");
+      } catch (e) {
+        console.warn("Could not alert. Payment cancels safely.", e);
+      }
     }
   }, []);
 

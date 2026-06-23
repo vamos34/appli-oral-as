@@ -13,9 +13,7 @@ interface SalesLandingPageProps {
 export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLandingPageProps) {
   const [selectedPlan, setSelectedPlan] = useState<number>(1); // Default to Recommended multi-pass plan
   const [isPaying, setIsPaying] = useState(false);
-  const [cardNumber, setCardNumber] = useState("4242 4242 4242 4242");
-  const [cardExpiry, setCardExpiry] = useState("12/28");
-  const [cardCvc, setCardCvc] = useState("424");
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
 
   const PLANS = [
@@ -96,25 +94,12 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsPaying(true);
-
-    // Si les détails de carte pré-remplis de test (4242) sont présents, on utilise un déblocage local
-    // instantané ultra-robuste. Cela est idéal pour les tests d'intégration rapides, et évite les
-    // blocages d'iframe dus aux politiques de sécurité du navigateur.
-    const isTestCard = cardNumber.replace(/\s/g, "") === "4242424242424242";
-
-    if (isTestCard) {
-      setTimeout(() => {
-        const plan = PLANS.find((p) => p.id === selectedPlan) || PLANS[1];
-        onUnlock(plan.credits, plan.name);
-        setIsPaying(false);
-      }, 1000);
-      return;
-    }
+    setPaymentError(null);
 
     const controller = new AbortController();
     const id = setTimeout(() => {
       controller.abort();
-    }, 4500); // 4.5 seconds timeout
+    }, 10000); // 10 seconds timeout
 
     try {
       const response = await fetch("/api/stripe/create-checkout-session", {
@@ -127,6 +112,11 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
         })
       });
       clearTimeout(id);
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || "Une erreur est survenue lors de l'accès à Stripe.");
+      }
 
       const result = await response.json();
 
@@ -142,21 +132,17 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
           window.open(result.url, "_blank");
         }
       } else {
-        // High-fidelity local sandbox fallback
-        setTimeout(() => {
-          const plan = PLANS.find((p) => p.id === selectedPlan) || PLANS[1];
-          onUnlock(plan.credits, plan.name);
-          setIsPaying(false);
-        }, 1200);
+        throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
       }
     } catch (err: any) {
       clearTimeout(id);
-      console.warn("Stripe Redirect failed or timed out, falling back to instant sandbox flow", err);
-      setTimeout(() => {
-        const plan = PLANS.find((p) => p.id === selectedPlan) || PLANS[1];
-        onUnlock(plan.credits, plan.name);
-        setIsPaying(false);
-      }, 1000);
+      console.error("Stripe Redirection failed", err);
+      if (err.name === "AbortError") {
+        setPaymentError("La demande de redirection de paiement a expiré. Veuillez vérifier votre connexion.");
+      } else {
+        setPaymentError(err.message || "Une erreur est survenue lors de la redirection vers la plateforme de paiement.");
+      }
+      setIsPaying(false);
     }
   };
 
@@ -519,79 +505,49 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
               </div>
 
               {/* Secure transaction certificate badge */}
-              <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-150 dark:border-emerald-900/45 p-3.5 rounded-2xl flex gap-2.5 items-start text-emerald-800 dark:text-emerald-200 text-[11px] leading-snug">
+              <div className="bg-emerald-50 border border-emerald-150 p-3.5 rounded-2xl flex gap-2.5 items-start text-emerald-800 text-[11px] leading-snug">
                 <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
                 <div>
-                  <strong className="block font-black text-emerald-900 dark:text-emerald-200 uppercase tracking-wide text-[9px] mb-0.5">🔒 Transaction 100% Sécurisée</strong>
-                  Vos informations bancaires font l'objet d'un chiffrement fort (protocole SSL AES-256 bits). Vos coordonnées ne transitent jamais sur nos serveurs et sont traitées directement par notre partenaire agréé Stripe.
+                  <strong className="block font-black text-emerald-950 uppercase tracking-wide text-[9px] mb-0.5">🔒 Transaction 100% Sécurisée</strong>
+                  Vos détails de paiement font l'objet d'un chiffrement conforme à la norme PCI-DSS géré de bout en bout par Stripe, leader mondial reconnu du paiement sur Internet. Vos coordonnées de carte ne transitent jamais sur de simples serveurs.
                 </div>
               </div>
 
+              {paymentError && (
+                <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex gap-2 items-start text-amber-900 text-xs leading-normal font-medium">
+                  <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-extrabold text-amber-950 uppercase tracking-wide text-[10px] mb-0.5">⚠️ Service de paiement non disponible</strong>
+                    {paymentError}
+                    <p className="mt-1 text-[10px] text-amber-700 font-normal">
+                      Si vous êtes l'administrateur, veuillez configurer la variable d'environnement <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px] text-rose-700">STRIPE_SECRET_KEY</code> avec vos clés Stripe de production pour débloquer les achats d'entraînement en ligne.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <form onSubmit={handleCheckout} className="space-y-4 text-left">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Numéro de Carte Bancaire</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      placeholder="4242 4242 4242 4242"
-                      value={cardNumber}
-                      onChange={(e) => setCardNumber(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono tracking-wide"
-                      maxLength={19}
-                    />
-                    <CreditCard className="absolute right-3.5 top-2.5 w-4 h-4 text-slate-400" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">Date d'expiration</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="MM/AA"
-                      value={cardExpiry}
-                      onChange={(e) => setCardExpiry(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono text-center"
-                      maxLength={5}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">CVV / CVC</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="123"
-                      value={cardCvc}
-                      onChange={(e) => setCardCvc(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 px-3 py-2 text-xs rounded-xl outline-none focus:ring-2 focus:ring-teal-500 transition text-slate-800 font-mono text-center"
-                      maxLength={4}
-                    />
-                  </div>
-                </div>
-
                 <button
                   type="submit"
                   disabled={isPaying}
-                  className="w-full bg-gradient-to-tr from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-extrabold py-3 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer text-xs md:text-sm"
+                  className="w-full bg-gradient-to-tr from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 disabled:from-slate-300 disabled:to-slate-450 disabled:cursor-not-allowed text-white font-extrabold py-3.5 rounded-xl transition shadow flex items-center justify-center gap-2 cursor-pointer text-xs md:text-sm"
                   id="btn-confirm-checkout"
                 >
                   {isPaying ? (
                     <span className="flex items-center gap-2">
                       <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                      Validation...
+                      Préparation du panier d'achat...
                     </span>
                   ) : (
-                    <span className="flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-teal-100" /> Débloquer mon accès ({currentPlan.price})
+                    <span className="flex items-center gap-1.5 uppercase font-black tracking-wider">
+                      <ShieldCheck className="w-4 h-4 text-teal-100" /> Procéder au paiement sécurisé ({currentPlan.price})
                     </span>
                   )}
                 </button>
               </form>
 
               <div className="text-[10px] text-slate-400 leading-relaxed text-center bg-slate-50 p-2.5 rounded-xl border border-slate-150">
-                🔒 Chiffrement SSL 256 bits • Dès validation, vous accéderez instantanément au Jury Virtuel de préparation aux épreuves d'admission.
+                🔒 Chiffrement SSL fort • Après validation de la transaction Stripe, vous serez automatiquement redirigé vers notre Jury Virtuel d'entraînement IFAS.
               </div>
             </div>
 

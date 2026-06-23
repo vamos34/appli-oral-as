@@ -7,6 +7,7 @@ import HistoryPanel from "./components/HistoryPanel";
 import SalesLandingPage from "./components/SalesLandingPage";
 import { CGVModal, MentionsLegalesModal } from "./components/LegalModals";
 import { Activity, Sparkles, RefreshCw, AlertCircle, ArrowLeft, HeartPulse, ShieldCheck, HelpCircle, User, Award, BookOpen, Send, CheckCircle2, ChevronRight, MessageSquare, Briefcase, Sun, Moon } from "lucide-react";
+import { safeLocalStorage, safeSessionStorage } from "./utils/storage";
 
 export default function App() {
   const {
@@ -22,17 +23,17 @@ export default function App() {
 
   // Dark mode / light mode state
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
-    const saved = localStorage.getItem("ifas_dark_theme");
+    const saved = safeLocalStorage.getItem("ifas_dark_theme");
     return saved === "true";
   });
 
   useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add("dark");
-      localStorage.setItem("ifas_dark_theme", "true");
+      safeLocalStorage.setItem("ifas_dark_theme", "true");
     } else {
       document.documentElement.classList.remove("dark");
-      localStorage.setItem("ifas_dark_theme", "false");
+      safeLocalStorage.setItem("ifas_dark_theme", "false");
     }
   }, [isDarkMode]);
 
@@ -53,7 +54,7 @@ export default function App() {
   // Past oral blank sessions
   const [pastSessions, setPastSessions] = useState<PastSession[]>(() => {
     try {
-      const saved = localStorage.getItem("ifas_past_sessions");
+      const saved = safeLocalStorage.getItem("ifas_past_sessions");
       return saved ? JSON.parse(saved) : [];
     } catch (_) {
       return [];
@@ -61,22 +62,22 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem("ifas_past_sessions", JSON.stringify(pastSessions));
+    safeLocalStorage.setItem("ifas_past_sessions", JSON.stringify(pastSessions));
   }, [pastSessions]);
 
   const [selectedPastSession, setSelectedPastSession] = useState<PastSession | null>(null);
 
   // App lock until payment status - false by default so the Sales Landing Page is the official homepage.
   const [isAppUnlocked, setIsAppUnlocked] = useState<boolean>(() => {
-    return sessionStorage.getItem("ifas_app_unlocked_session") === "true";
+    return safeSessionStorage.getItem("ifas_app_unlocked_session") === "true";
   });
 
   // Automatically unlock only if actively marked in session
   useEffect(() => {
     if (isAppUnlocked) {
-      sessionStorage.setItem("ifas_app_unlocked_session", "true");
+      safeSessionStorage.setItem("ifas_app_unlocked_session", "true");
     } else {
-      sessionStorage.removeItem("ifas_app_unlocked_session");
+      safeSessionStorage.removeItem("ifas_app_unlocked_session");
     }
   }, [isAppUnlocked]);
 
@@ -303,7 +304,7 @@ export default function App() {
           onUnlock={(creditsToAdd, planName) => {
             refillCredits(creditsToAdd, `Formule : ${planName}`);
             setIsAppUnlocked(true);
-            localStorage.setItem("ifas_app_unlocked", "true");
+            safeLocalStorage.setItem("ifas_app_unlocked", "true");
           }}
           onOpenLegal={(page) => setViewingLegalPage(page)}
         />
