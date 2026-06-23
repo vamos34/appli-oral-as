@@ -15,21 +15,30 @@ const PORT = 3000;
 // Lazy Stripe client initialization to resist startup failure when STRIPE_SECRET_KEY is missing
 let stripeClient: Stripe | null = null;
 function getStripe(): Stripe {
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  let stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeSecretKey) {
-    throw new Error("STRIPE_SECRET_KEY has not been defined in environment secrets.");
+    throw new Error("La variable d'environnement STRIPE_SECRET_KEY n'est pas définie dans vos secrets.");
   }
-  // Safeguard against popular placeholder values that cause slow timeouts or hangs
-  const cleanKey = stripeSecretKey.trim().toLowerCase();
-  if (
-    !stripeSecretKey.startsWith("sk_") || 
-    cleanKey.includes("your") || 
-    cleanKey.includes("placeholder") || 
-    cleanKey.includes("insert") ||
-    stripeSecretKey.length < 15
-  ) {
-    throw new Error("STRIPE_SECRET_KEY appears to be unconfigured or a dummy placeholder. Falling back to local sandbox simulation.");
+
+  // Nettoyage des espaces et des guillemets doubles ou simples
+  stripeSecretKey = stripeSecretKey.trim();
+  if (stripeSecretKey.startsWith('"') && stripeSecretKey.endsWith('"')) {
+    stripeSecretKey = stripeSecretKey.slice(1, -1).trim();
+  } else if (stripeSecretKey.startsWith("'") && stripeSecretKey.endsWith("'")) {
+    stripeSecretKey = stripeSecretKey.slice(1, -1).trim();
   }
+
+  const cleanKey = stripeSecretKey.toLowerCase();
+  const hasValidPrefix = cleanKey.startsWith("sk_") || cleanKey.startsWith("rk_");
+  const isPlaceholder = cleanKey.includes("your") || cleanKey.includes("placeholder") || cleanKey.includes("insert");
+  const isTooShort = stripeSecretKey.length < 15;
+
+  if (!hasValidPrefix || isPlaceholder || isTooShort) {
+    throw new Error(
+      `La clé de sécurité Stripe configurée semble invalide ou mal formatée. Elle doit commencer par 'sk_' ou 'rk_'. Début de la clé reçue : "${stripeSecretKey.substring(0, 8)}..." (longueur totale: ${stripeSecretKey.length}).`
+    );
+  }
+
   if (!stripeClient) {
     stripeClient = new Stripe(stripeSecretKey, {
       apiVersion: "2023-10-16" as any,
@@ -373,7 +382,7 @@ app.post("/api/stripe/create-checkout-session", async (req, res) => {
   } catch (error: any) {
     console.error("[Stripe API Error] Stripe creation failed.", error.message);
     res.status(500).json({
-      error: "Service de paiement indisponible.",
+      error: `Erreur d'accès à Stripe : ${error.message}`,
       details: error.message
     });
   }

@@ -14,6 +14,7 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
   const [selectedPlan, setSelectedPlan] = useState<number>(1); // Default to Recommended multi-pass plan
   const [isPaying, setIsPaying] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [stripeUrl, setStripeUrl] = useState<string | null>(null);
   const [activeFaqIndex, setActiveFaqIndex] = useState<number | null>(null);
 
   const PLANS = [
@@ -95,6 +96,7 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
     e.preventDefault();
     setIsPaying(true);
     setPaymentError(null);
+    setStripeUrl(null);
 
     const controller = new AbortController();
     const id = setTimeout(() => {
@@ -121,7 +123,20 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
       const result = await response.json();
 
       if (result.url) {
-        window.location.href = result.url;
+        setStripeUrl(result.url);
+        
+        // Detect if running inside iframe (like AI Studio)
+        const isInIframe = window.self !== window.top;
+        if (isInIframe) {
+          const newWindow = window.open(result.url, "_blank");
+          if (newWindow) {
+            setPaymentError("Une fenêtre de paiement sécurisé vient de s'ouvrir. Si elle n'apparaît pas, veuillez utiliser le bouton ci-dessous.");
+          } else {
+            setPaymentError("L'ouverture automatique a été bloquée par votre navigateur. Veuillez cliquer sur le bouton de secours ci-dessous.");
+          }
+        } else {
+          window.location.href = result.url;
+        }
       } else {
         throw new Error("L'URL de redirection Stripe n'a pas pu être générée.");
       }
@@ -514,6 +529,23 @@ export default function SalesLandingPage({ onUnlock, onOpenLegal }: SalesLanding
                       Si vous êtes l'administrateur, veuillez configurer la variable d'environnement <code className="bg-amber-100 px-1 py-0.2 rounded font-mono text-[9px] text-rose-700">STRIPE_SECRET_KEY</code> avec vos clés Stripe de production pour débloquer les achats d'entraînement en ligne.
                     </p>
                   </div>
+                </div>
+              )}
+
+              {stripeUrl && (
+                <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl text-center space-y-2">
+                  <strong className="block font-bold text-teal-950 text-xs">🚀 Lien de paiement généré avec succès !</strong>
+                  <p className="text-[11px] text-teal-800">
+                    S'agissant d'un environnement sécurisé de prévisualisation, veuillez cliquer sur le bouton ci-dessous pour ouvrir l'interface de paiement Stripe :
+                  </p>
+                  <a
+                    href={stripeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex w-full justify-center items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white font-extrabold py-3.5 px-4 rounded-xl transition duration-150 animate-pulse text-xs uppercase tracking-wider shadow-md hover:scale-[1.02]"
+                  >
+                    👉 Ouvrir la page de paiement sécurisée ({currentPlan.name})
+                  </a>
                 </div>
               )}
 
